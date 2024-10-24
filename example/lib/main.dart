@@ -15,6 +15,11 @@ import 'package:dart_melty_soundfont/array_int16.dart';
 
 String asset = 'assets/TimGM6mbEdit.sf2';
 int sampleRate = 44100;
+int feedThreshold = 8000;
+int newBufferLength = 12000;
+
+int bpm = 120;
+List<int> notes = [60, 62, 64, 65, 67, 69, 71, 72];
 
 void main() => runApp(const MeltyApp());
 
@@ -35,6 +40,9 @@ class _MyAppState extends State<MeltyApp> {
   int _fedCount = 0;
   int _prevNote = 0;
 
+  int _currentNote = 0;
+  int _generatedSamples = 0;
+
   @override
   void initState() {
     super.initState();
@@ -42,21 +50,20 @@ class _MyAppState extends State<MeltyApp> {
     // DartMeltySoundfont
     _loadSoundfont().then((_) {
       _soundFontLoaded = true;
+      print("Soundfont loaded");
       setState(() {});
     });
 
     // FlutterPcmSound
-    _loadPcmSound().then((_) {
-      _pcmSoundLoaded = true;
-      setState(() {});
-    });
+    _loadPcmSound();
+    _pcmSoundLoaded = true;
   }
 
-  Future<void> _loadPcmSound() async {
+  void _loadPcmSound() {
+    FlutterPcmSound.setLogLevel(LogLevel.verbose);
+    FlutterPcmSound.setup(sampleRate: sampleRate, channelCount: 1);
+    FlutterPcmSound.setFeedThreshold(feedThreshold);
     FlutterPcmSound.setFeedCallback(onFeed);
-    await FlutterPcmSound.setLogLevel(LogLevel.standard);
-    await FlutterPcmSound.setFeedThreshold(8000);
-    await FlutterPcmSound.setup(sampleRate: sampleRate, channelCount: 1);
   }
 
   Future<void> _loadSoundfont() async {
@@ -79,23 +86,52 @@ class _MyAppState extends State<MeltyApp> {
     super.dispose();
   }
 
+  ArrayInt16 renderNextBuffer() {
+    ArrayInt16 newBuffer = ArrayInt16.zeros(numShorts: newBufferLength);
+    double noteLenghtInSeconds = 60 / bpm;
+    int noteLenghtInSamples = (noteLenghtInSeconds * sampleRate).round();
+
+    if (_generatedSamples > noteLenghtInSamples) {
+      _generatedSamples = 0;
+      _synth!.noteOff(channel: 0, key: notes[_currentNote % notes.length]);
+      _currentNote++;
+      _synth!.noteOn(channel: 0, key: notes[_currentNote % notes.length], velocity: 120);
+    }
+
+    _synth!.renderMonoInt16(newBuffer);
+
+    _generatedSamples += newBufferLength;
+
+    /*Uint8List newBufferBytes = newBuffer.bytes.buffer.asUint8List();
+    Uint8List currentNoteBytes = currentNoteSamples.bytes.buffer.asUint8List();
+    Uint8List concatenatedBytes = Uint8List.fromList([...newBufferBytes, ...currentNoteBytes]);
+    ByteData concatenatedData = ByteData.sublistView(concatenatedBytes);
+    newBuffer = ArrayInt16(bytes: concatenatedData);*/
+
+    //samplesToGenerate -= noteLenghtInSamples;
+    //} while (samplesToGenerate >= noteLenghtInSamples);
+    return newBuffer;
+  }
+
   void onFeed(int remainingFrames) async {
     setState(() {
       _remainingFrames = remainingFrames;
     });
     // c major scale
-    List<int> notes = [60, 62, 64, 65, 67, 69, 71, 72];
+    /*List<int> notes = [60, 62, 64, 65, 67, 69, 71, 72];
     int step = (_fedCount ~/ 16) % notes.length;
     int curNote = notes[step];
     if (curNote != _prevNote) {
       _synth!.noteOff(channel: 0, key: _prevNote);
       _synth!.noteOn(channel: 0, key: curNote, velocity: 120);
     }
-    ArrayInt16 buf16 = ArrayInt16.zeros(numShorts: 1000);
-    _synth!.renderMonoInt16(buf16);
+    ArrayInt16 buf16 = ArrayInt16.zeros(numShorts: newBufferLength);
+    _synth!.renderMonoInt16(buf16);*/
+
+    final buf16 = renderNextBuffer();
     await FlutterPcmSound.feed(PcmArrayInt16(bytes: buf16.bytes));
-    _fedCount++;
-    _prevNote = curNote;
+    // _fedCount++;
+    // _prevNote = curNote;
   }
 
   Future<void> _play() async {
