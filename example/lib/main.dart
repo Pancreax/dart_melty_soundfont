@@ -1,22 +1,11 @@
 // ignore_for_file: avoid_print
 
-import 'dart:typed_data'; // for Uint8List
-import 'dart:ui';
-
-import 'package:dart_melty_soundfont/preset.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'dart:math';
+import 'package:example/audio_renderer.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 
-import 'package:dart_melty_soundfont/synthesizer.dart';
-import 'package:dart_melty_soundfont/synthesizer_settings.dart';
-import 'package:dart_melty_soundfont/audio_renderer_ex.dart';
-import 'package:dart_melty_soundfont/array_int16.dart';
-
-//String asset = 'assets/TimGM6mbEdit.sf2';
-String asset = 'assets/best_soundfont.sf2';
 List<int> notes = [60, 62, 64, 65, 67, 69, 71, 72];
 
 void main() => runApp(const MeltyApp());
@@ -29,29 +18,28 @@ class MeltyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MeltyApp> {
-  Synthesizer? _synth;
+  AudioRenderer? _renderer;
 
   int sampleRate = 44100;
   int feedThreshold = 8000;
   int newBufferLength = 12000;
   int bpm = 120;
-  int preset = 147;
+  int preset = 24;
   bool noteOff = true;
 
   bool _isPlaying = false;
   bool _pcmSoundLoaded = false;
   bool _soundFontLoaded = false;
   int _remainingFrames = 0;
-  int _currentNote = 0;
-  int _currentNoteSamplesLeft = 0;
-  int _allTimeSampleCount = 0;
+  int _currentNote = -1;
+  int _currentNoteGeneratedSamples = 0;
 
   @override
   void initState() {
     super.initState();
 
     // DartMeltySoundfont
-    _loadSoundfont().then((_) {
+    _loadRenderer().then((_) {
       _soundFontLoaded = true;
       print("Soundfont loaded");
       setState(() {});
@@ -69,18 +57,9 @@ class _MyAppState extends State<MeltyApp> {
     FlutterPcmSound.setFeedCallback(onFeed);
   }
 
-  Future<void> _loadSoundfont() async {
-    ByteData bytes = await rootBundle.load(asset);
-    _synth = Synthesizer.loadByteData(bytes, SynthesizerSettings());
-
-    // print available instruments
-    List<Preset> p = _synth!.soundFont.presets;
-    for (int i = 0; i < p.length; i++) {
-      String instrumentName = p[i].regions.isNotEmpty ? p[i].regions[0].instrument.name : "N/A";
-      print('[preset $i] name: ${p[i].name} instrument: $instrumentName');
-    }
-
-    return Future<void>.value(null);
+  Future<void> _loadRenderer() async {
+    _renderer = AudioRenderer(bufferSizeInSamples: newBufferLength, sampleRate: sampleRate);
+    return _renderer!.loadSoundfont();
   }
 
   @override
@@ -89,65 +68,24 @@ class _MyAppState extends State<MeltyApp> {
     super.dispose();
   }
 
-  void nextNote() {
-    _currentNote = _currentNote + 1;
-  }
+  List<AudioRendererEvent> getEventsToRender() {
+    List<AudioRendererEvent> events = List.empty(growable: true);
 
-  ({ArrayInt16 nextBuffer, int samplesLeftFromCurrentNote}) renderNextBuffer(int samplesToRenderFromLastNote) {
-    ArrayInt16 newBuffer = ArrayInt16.zeros(numShorts: newBufferLength);
     double noteLenghtInSeconds = 60 / bpm;
     int noteLenghtInSamples = (noteLenghtInSeconds * sampleRate).round();
 
-    int generatedSamples = 0;
-
-    if (samplesToRenderFromLastNote > newBufferLength) {
-      print("👹 1 BIG note! rendering $newBufferLength samples");
-      _allTimeSampleCount += newBuffer.bytes.lengthInBytes ~/ 2;
-      _synth!.renderMonoInt16(newBuffer);
-      int noteSamplesLeft = samplesToRenderFromLastNote - newBufferLength;
-      return (nextBuffer: newBuffer, samplesLeftFromCurrentNote: noteSamplesLeft);
-    } else if (samplesToRenderFromLastNote > 0) {
-      print("👹 2 end of big note rendering $samplesToRenderFromLastNote samples");
-      final bufferView = ByteData.sublistView(newBuffer.bytes, 0, samplesToRenderFromLastNote * 2);
-      final arrayView = ArrayInt16(bytes: bufferView);
-      _allTimeSampleCount += arrayView.bytes.lengthInBytes ~/ 2;
-      _synth!.renderMonoInt16(arrayView);
-      print("👹 NOTE OFF ${_currentNote % notes.length} sample $_allTimeSampleCount");
+    int samplesToGenerate = max(noteLenghtInSamples - _currentNoteGeneratedSamples, 0);
+    while (samplesToGenerate <= newBufferLength) {
       if (noteOff) {
-        _synth!.noteOff(channel: 0, key: notes[_currentNote % notes.length]);
+        events.add(NoteOff(sample: samplesToGenerate, key: notes[_currentNote % notes.length]));
       }
-      nextNote();
-      generatedSamples = samplesToRenderFromLastNote;
+      _currentNote++;
+      events.add(NoteOn(sample: samplesToGenerate, key: notes[_currentNote % notes.length]));
+      _currentNoteGeneratedSamples = 0;
+      samplesToGenerate += noteLenghtInSamples;
     }
-
-    while (true) {
-      print("👹👹 NOTE ON ${_currentNote % notes.length} sample $_allTimeSampleCount");
-      _synth!.noteOn(channel: 0, key: notes[_currentNote % notes.length], velocity: 127);
-      if (noteLenghtInSamples + generatedSamples >= newBufferLength) {
-        final samplesToGenerate = newBufferLength - generatedSamples;
-        print("👹 3 last note rendering $samplesToGenerate samples");
-        int noteSamplesLeft = noteLenghtInSamples - samplesToGenerate;
-        final bufferView = ByteData.sublistView(newBuffer.bytes, generatedSamples * 2);
-        final arrayView = ArrayInt16(bytes: bufferView);
-        _allTimeSampleCount += arrayView.bytes.lengthInBytes ~/ 2;
-        _synth!.renderMonoInt16(arrayView);
-        return (nextBuffer: newBuffer, samplesLeftFromCurrentNote: noteSamplesLeft);
-      } else {
-        final start = generatedSamples;
-        final end = generatedSamples + noteLenghtInSamples;
-        print("👹 4 middle note rendering ${end - start} ${noteLenghtInSamples} samples");
-        final bufferView = ByteData.sublistView(newBuffer.bytes, start * 2, end * 2);
-        final arrayView = ArrayInt16(bytes: bufferView);
-        _allTimeSampleCount += arrayView.bytes.lengthInBytes ~/ 2;
-        _synth!.renderMonoInt16(arrayView);
-        print("👹👹 NOTE OFF ${_currentNote % notes.length} sample $_allTimeSampleCount");
-        if (noteOff) {
-          _synth!.noteOff(channel: 0, key: notes[_currentNote % notes.length]);
-        }
-        nextNote();
-        generatedSamples += noteLenghtInSamples;
-      }
-    }
+    _currentNoteGeneratedSamples += min(noteLenghtInSamples - (samplesToGenerate - newBufferLength), newBufferLength);
+    return events;
   }
 
   void onFeed(int remainingFrames) async {
@@ -155,13 +93,12 @@ class _MyAppState extends State<MeltyApp> {
       _remainingFrames = remainingFrames;
     });
 
-    final (nextBuffer: buf16, samplesLeftFromCurrentNote: samplesLeft) = renderNextBuffer(_currentNoteSamplesLeft);
-    _currentNoteSamplesLeft = samplesLeft;
+    final buf16 = await _renderer!.render(getEventsToRender());
     await FlutterPcmSound.feed(PcmArrayInt16(bytes: buf16.bytes));
   }
 
   Future<void> _play() async {
-    //setPreset(preset);
+    setPreset(preset);
     // start playing audio
     await FlutterPcmSound.play();
 
@@ -178,11 +115,7 @@ class _MyAppState extends State<MeltyApp> {
   }
 
   void setPreset(int preset) {
-    // turnOff all notes
-    _synth!.noteOffAll();
-
-    // select preset (i.e. instrument)
-    _synth!.selectPreset(channel: 0, preset: preset);
+    _renderer!.setPreset(preset);
   }
 
   @override
