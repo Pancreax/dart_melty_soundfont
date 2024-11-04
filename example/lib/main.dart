@@ -21,8 +21,8 @@ class _MyAppState extends State<MeltyApp> {
   AudioRenderer? _renderer;
 
   int sampleRate = 44100;
-  int feedThreshold = 8000;
-  int newBufferLength = 12000;
+  int feedThreshold = 4000;
+  int newBufferLength = 6000;
   int bpm = 120;
   int preset = 24;
   bool noteOff = true;
@@ -58,7 +58,7 @@ class _MyAppState extends State<MeltyApp> {
   }
 
   Future<void> _loadRenderer() async {
-    _renderer = AudioRenderer(bufferSizeInSamples: newBufferLength, sampleRate: sampleRate);
+    _renderer = AudioRenderer();
     return _renderer!.loadSoundfont();
   }
 

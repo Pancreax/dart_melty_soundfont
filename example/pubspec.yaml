@@ -11,6 +11,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  async: ^2.10.0
   flutter_pcm_sound: ^1.2.2
   dart_melty_soundfont:
     path: ../
