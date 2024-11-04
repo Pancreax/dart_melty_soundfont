@@ -89,12 +89,25 @@ class _MyAppState extends State<MeltyApp> {
   }
 
   void onFeed(int remainingFrames) async {
+    final startTime = DateTime.now();
     setState(() {
       _remainingFrames = remainingFrames;
     });
 
-    final buf16 = await _renderer!.render(getEventsToRender());
+    final startEvents = DateTime.now();
+    final events = getEventsToRender();
+    final elapsedEvents = DateTime.now().difference(startEvents);
+
+    final startRender = DateTime.now();
+    final buf16 = await _renderer!.render(events);
+    final elapsedRender = DateTime.now().difference(startRender);
+
+    final startfeed = DateTime.now();
     await FlutterPcmSound.feed(PcmArrayInt16(bytes: buf16.bytes));
+    final elapsedfeed = DateTime.now().difference(startfeed);
+    final elapsed = DateTime.now().difference(startTime);
+    print(
+        "👹 Total ${elapsed.inMilliseconds} ${sampleRate * elapsed.inMilliseconds / 1000} events ${elapsedEvents.inMilliseconds} render ${elapsedRender.inMilliseconds} feed ${elapsedfeed.inMilliseconds}");
   }
 
   Future<void> _play() async {
@@ -162,7 +175,7 @@ class _MyAppState extends State<MeltyApp> {
                           max: 600,
                           value: bpm.toDouble(),
                           onChanged: (value) {
-                            bpm = value.round();
+                            setState(() => bpm = value.round());
                           },
                         ),
                       ),
@@ -195,7 +208,7 @@ class _MyAppState extends State<MeltyApp> {
                           max: 277,
                           value: preset.toDouble(),
                           onChanged: (value) {
-                            preset = value.round();
+                            setState(() => preset = value.round());
                             setPreset(value.round());
                           },
                         ),
@@ -211,6 +224,10 @@ class _MyAppState extends State<MeltyApp> {
                   ),
                 ],
               ),
+            ),
+            Padding(
+              padding: EdgeInsets.all(20),
+              child: CircularProgressIndicator(),
             ),
           ],
         ),

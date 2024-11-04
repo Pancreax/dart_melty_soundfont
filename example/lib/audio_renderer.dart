@@ -61,6 +61,7 @@ class AudioRenderer {
   }
 
   Future<ArrayInt16> render(List<AudioRendererEvent> events) async {
+    final startBlockedRender = DateTime.now();
     int lastSample = 0;
     for (final event in events) {
       final lenght = event.sample - lastSample;
@@ -71,6 +72,8 @@ class AudioRenderer {
       lastSample = event.sample;
     }
     _synth!.renderMonoInt16(_buffer, offset: lastSample);
+    final elapsedBlockedRender = DateTime.now().difference(startBlockedRender);
+    print("👹👹 blocking render ${elapsedBlockedRender.inMilliseconds}");
     return _buffer;
   }
 }
